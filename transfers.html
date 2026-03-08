@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>سوق الانتقالات - الدوري المصري</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <a href="index.html" class="back-btn">← رجوع</a>
+        
+        <div class="header">
+            <h1>💰 سوق الانتقالات</h1>
+            <p id="budgetDisplay">الميزانية: 0 مليون $</p>
+        </div>
+        
+        <div class="message" id="message" style="display: none;"></div>
+        
+        <!-- اللاعبين المعروضين -->
+        <div class="transfer-list" id="transferList">
+            <!-- يضاف بالـ JavaScript -->
+        </div>
+        
+        <!-- فريقك الحالي -->
+        <div class="formation-section" style="margin-top: 20px;">
+            <h3>فريقك الحالي</h3>
+            <div class="players-list" id="teamPlayers">
+                <!-- يضاف بالـ JavaScript -->
+            </div>
+        </div>
+    </div>
+    
+    <script src="js/data.js"></script>
+    <script>
+        let gameState = JSON.parse(localStorage.getItem('egyptianLeague'));
+        
+        if (!gameState) {
+            window.location.href = 'index.html';
+        }
+        
+        const team = TEAMS[gameState.team];
+        
+        function updateBudget() {
+            document.getElementById('budgetDisplay').textContent = 
+                `الميزانية: ${gameState.budget} مليون $`;
+        }
+        
+        function showMessage(text, isSuccess) {
+            const msg = document.getElementById('message');
+            msg.textContent = text;
+            msg.className = isSuccess ? 'message success' : 'message';
+            msg.style.display = 'block';
+            setTimeout(() => msg.style.display = 'none', 3000);
+        }
+        
+        function renderTransferList() {
+            const list = document.getElementById('transferList');
+            list.innerHTML = '';
+            
+            TRANSFER_MARKET.forEach(player => {
+                const div = document.createElement('div');
+                div.className = 'transfer-item';
+                
+                const canAfford = gameState.budget >= player.price;
+                
+                div.innerHTML = `
+                    <div class="transfer-info">
+                        <h4>${player.name}</h4>
+                        <div class="details">
+                            ${player.position} | ${player.rating} ⭐ | ${player.age} سنة
+                        </div>
+                    </div>
+                    <div style="text-align: left;">
+                        <div class="transfer-price">${player.price}M $</div>
+                        <button class="buy-btn" ${!canAfford ? 'disabled' : ''} 
+                                onclick="buyPlayer('${player.id}')">
+                            ${canAfford ? 'شراء' : 'لا يوجد مال'}
+                        </button>
+                    </div>
+                `;
+                
+                list.appendChild(div);
+            });
+        }
+        
+        function renderTeamPlayers() {
+            const list = document.getElementById('teamPlayers');
+            list.innerHTML = '';
+            
+            team.players.forEach(player => {
+                const div = document.createElement('div');
+                div.className = 'player-item';
+                div.innerHTML = `
+                    <div class="player-info">
+                        <h4>${player.name}</h4>
+                        <span>${player.position} | ${player.rating} ⭐</span>
+                    </div>
+                    <div class="player-rating">${player.rating}</div>
+                `;
+                list.appendChild(div);
+            });
+        }
+        
+        function buyPlayer(playerId) {
+            const player = TRANSFER_MARKET.find(p => p.id === playerId);
+            if (!player) return;
+            
+            if (gameState.budget >= player.price) {
+                gameState.budget -= player.price;
+                
+                // إضافة اللاعب للفريق
+                const newPlayer = {
+                    ...player,
+                    id: `new_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                };
+                team.players.push(newPlayer);
+                
+                // تحديث TEAMS في localStorage (لأنه مش متصل مباشرة)
+                localStorage.setItem('egyptianLeague', JSON.stringify(gameState));
+                
+                showMessage(`تم شراء ${player.name} بنجاح!`, true);
+                updateBudget();
+                renderTransferList();
+                renderTeamPlayers();
+            } else {
+                showMessage('لا يوجد مال كافي!', false);
+            }
+        }
+        
+        // التهيئة
+        updateBudget();
+        renderTransferList();
+        renderTeamPlayers();
+    </script>
+</body>
+</html>
