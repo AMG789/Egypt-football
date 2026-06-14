@@ -1,0 +1,841 @@
+<html lang="ar" dir="rtl"><head>
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
+<!-- PLAYABLE_TOUCH_PATCH_V1 --><script>
+(function() {
+  if (window.__playableTouchPatchInstalled) return;
+  window.__playableTouchPatchInstalled = true;
+  var origAdd = EventTarget.prototype.addEventListener;
+  var blockedTypes = { touchstart: 1, touchmove: 1, wheel: 1 };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (blockedTypes[type]) {
+      if (options === undefined || options === null) {
+        options = { passive: true };
+      } else if (typeof options === 'boolean') {
+        options = { capture: options, passive: true };
+      } else {
+        options = Object.assign({}, options, { passive: true });
+      }
+    }
+    return origAdd.call(this, type, listener, options);
+  };
+})();
+</script><script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>مخاور دار الأصالة | فخامة المخور الإماراتي</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&amp;family=Tajawal:wght@400;500;700;800&amp;display=swap" rel="stylesheet">
+<style>
+:root{--primary:#0E5E4F;--gold:#C9A86B;--sand:#F5EFE6;--charcoal:#1f2937}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:'Cairo','Tajawal',system-ui;background:var(--sand);color:var(--charcoal);-webkit-font-smoothing:antialiased}
+.editable:focus{outline:2px dashed var(--gold);outline-offset:4px;border-radius:8px}
+.tab-btn{padding:.6rem 1rem;border-bottom:2px solid transparent;transition:.2s}
+.tab-btn.active{border-color:var(--primary);color:var(--primary);font-weight:800}
+.no-scrollbar::-webkit-scrollbar{display:none}
+</style>
+<style>*, ::before, ::after{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:rgb(59 130 246 / 0.5);--tw-ring-offset-shadow:0 0 #0000;--tw-ring-shadow:0 0 #0000;--tw-shadow:0 0 #0000;--tw-shadow-colored:0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }::backdrop{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-rotate:0;--tw-skew-x:0;--tw-skew-y:0;--tw-scale-x:1;--tw-scale-y:1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness:proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-color:rgb(59 130 246 / 0.5);--tw-ring-offset-shadow:0 0 #0000;--tw-ring-shadow:0 0 #0000;--tw-shadow:0 0 #0000;--tw-shadow-colored:0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }/* ! tailwindcss v3.4.17 | MIT License | https://tailwindcss.com */*,::after,::before{box-sizing:border-box;border-width:0;border-style:solid;border-color:#e5e7eb}::after,::before{--tw-content:''}:host,html{line-height:1.5;-webkit-text-size-adjust:100%;-moz-tab-size:4;tab-size:4;font-family:ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";font-feature-settings:normal;font-variation-settings:normal;-webkit-tap-highlight-color:transparent}body{margin:0;line-height:inherit}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,pre,samp{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;font-feature-settings:normal;font-variation-settings:normal;font-size:1em}small{font-size:80%}sub,sup{font-size:75%;line-height:0;position:relative;vertical-align:baseline}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}button,input,optgroup,select,textarea{font-family:inherit;font-feature-settings:inherit;font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;letter-spacing:inherit;color:inherit;margin:0;padding:0}button,select{text-transform:none}button,input:where([type=button]),input:where([type=reset]),input:where([type=submit]){-webkit-appearance:button;background-color:transparent;background-image:none}:-moz-focusring{outline:auto}:-moz-ui-invalid{box-shadow:none}progress{vertical-align:baseline}::-webkit-inner-spin-button,::-webkit-outer-spin-button{height:auto}[type=search]{-webkit-appearance:textfield;outline-offset:-2px}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-file-upload-button{-webkit-appearance:button;font:inherit}summary{display:list-item}blockquote,dd,dl,figure,h1,h2,h3,h4,h5,h6,hr,p,pre{margin:0}fieldset{margin:0;padding:0}legend{padding:0}menu,ol,ul{list-style:none;margin:0;padding:0}dialog{padding:0}textarea{resize:vertical}input::placeholder,textarea::placeholder{opacity:1;color:#9ca3af}[role=button],button{cursor:pointer}:disabled{cursor:default}audio,canvas,embed,iframe,img,object,svg,video{display:block;vertical-align:middle}img,video{max-width:100%;height:auto}[hidden]:where(:not([hidden=until-found])){display:none}.pointer-events-none{pointer-events:none}.fixed{position:fixed}.absolute{position:absolute}.relative{position:relative}.sticky{position:sticky}.-inset-6{inset:-1.5rem}.inset-0{inset:0px}.inset-x-0{left:0px;right:0px}.-bottom-5{bottom:-1.25rem}.-left-5{left:-1.25rem}.bottom-5{bottom:1.25rem}.bottom-6{bottom:1.5rem}.left-5{left:1.25rem}.right-6{right:1.5rem}.top-0{top:0px}.z-10{z-index:10}.z-20{z-index:20}.z-30{z-index:30}.z-40{z-index:40}.z-\[100\]{z-index:100}.z-\[200\]{z-index:200}.z-\[150\]{z-index:150}.z-\[300\]{z-index:300}.col-span-2{grid-column:span 2 / span 2}.mx-auto{margin-left:auto;margin-right:auto}.-mt-0\.5{margin-top:-0.125rem}.mb-10{margin-bottom:2.5rem}.mb-12{margin-bottom:3rem}.mb-2{margin-bottom:0.5rem}.mb-3{margin-bottom:0.75rem}.mb-4{margin-bottom:1rem}.mb-5{margin-bottom:1.25rem}.mb-6{margin-bottom:1.5rem}.ml-2{margin-left:0.5rem}.mr-1{margin-right:0.25rem}.mr-auto{margin-right:auto}.mt-1{margin-top:0.25rem}.mt-10{margin-top:2.5rem}.mt-2{margin-top:0.5rem}.mt-4{margin-top:1rem}.mt-5{margin-top:1.25rem}.mt-8{margin-top:2rem}.flex{display:flex}.inline-flex{display:inline-flex}.grid{display:grid}.hidden{display:none}.aspect-\[4\/5\]{aspect-ratio:4/5}.h-10{height:2.5rem}.h-12{height:3rem}.h-14{height:3.5rem}.h-2{height:0.5rem}.h-8{height:2rem}.h-\[520px\]{height:520px}.h-full{height:100%}.h-9{height:2.25rem}.h-fit{height:-moz-fit-content;height:fit-content}.max-h-\[420px\]{max-height:420px}.max-h-\[90vh\]{max-height:90vh}.w-10{width:2.5rem}.w-12{width:3rem}.w-14{width:3.5rem}.w-2{width:0.5rem}.w-8{width:2rem}.w-full{width:100%}.w-9{width:2.25rem}.max-w-2xl{max-width:42rem}.max-w-4xl{max-width:56rem}.max-w-6xl{max-width:72rem}.max-w-7xl{max-width:80rem}.max-w-md{max-width:28rem}.max-w-sm{max-width:24rem}.max-w-xl{max-width:36rem}.max-w-3xl{max-width:48rem}@keyframes pulse{50%{opacity:.5}}.animate-pulse{animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite}.cursor-pointer{cursor:pointer}.grid-cols-2{grid-template-columns:repeat(2, minmax(0, 1fr))}.grid-cols-3{grid-template-columns:repeat(3, minmax(0, 1fr))}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}.place-items-center{place-items:center}.items-center{align-items:center}.justify-center{justify-content:center}.justify-between{justify-content:space-between}.gap-1{gap:0.25rem}.gap-1\.5{gap:0.375rem}.gap-10{gap:2.5rem}.gap-2{gap:0.5rem}.gap-3{gap:0.75rem}.gap-4{gap:1rem}.gap-5{gap:1.25rem}.gap-6{gap:1.5rem}.gap-7{gap:1.75rem}.-space-x-2 > :not([hidden]) ~ :not([hidden]){--tw-space-x-reverse:0;margin-right:calc(-0.5rem * var(--tw-space-x-reverse));margin-left:calc(-0.5rem * calc(1 - var(--tw-space-x-reverse)))}.space-y-2 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(0.5rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(0.5rem * var(--tw-space-y-reverse))}.space-y-3 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(0.75rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(0.75rem * var(--tw-space-y-reverse))}.space-y-4 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(1rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(1rem * var(--tw-space-y-reverse))}.space-y-6 > :not([hidden]) ~ :not([hidden]){--tw-space-y-reverse:0;margin-top:calc(1.5rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(1.5rem * var(--tw-space-y-reverse))}.overflow-auto{overflow:auto}.overflow-hidden{overflow:hidden}.overflow-x-auto{overflow-x:auto}.rounded-2xl{border-radius:1rem}.rounded-3xl{border-radius:1.5rem}.rounded-\[2\.5rem\]{border-radius:2.5rem}.rounded-\[2rem\]{border-radius:2rem}.rounded-\[3rem\]{border-radius:3rem}.rounded-full{border-radius:9999px}.rounded-xl{border-radius:0.75rem}.border{border-width:1px}.border-2{border-width:2px}.border-y{border-top-width:1px;border-bottom-width:1px}.border-b{border-bottom-width:1px}.border-t{border-top-width:1px}.border-\[var\(--gold\)\]{border-color:var(--gold)}.border-\[var\(--sand\)\]{border-color:var(--sand)}.border-black\/10{border-color:rgb(0 0 0 / 0.1)}.border-black\/5{border-color:rgb(0 0 0 / 0.05)}.border-white{--tw-border-opacity:1;border-color:rgb(255 255 255 / var(--tw-border-opacity, 1))}.border-white\/50{border-color:rgb(255 255 255 / 0.5)}.bg-\[\#25D366\]{--tw-bg-opacity:1;background-color:rgb(37 211 102 / var(--tw-bg-opacity, 1))}.bg-\[var\(--primary\)\]{background-color:var(--primary)}.bg-\[var\(--sand\)\]{background-color:var(--sand)}.bg-black\/70{background-color:rgb(0 0 0 / 0.7)}.bg-green-500{--tw-bg-opacity:1;background-color:rgb(34 197 94 / var(--tw-bg-opacity, 1))}.bg-white{--tw-bg-opacity:1;background-color:rgb(255 255 255 / var(--tw-bg-opacity, 1))}.bg-white\/50{background-color:rgb(255 255 255 / 0.5)}.bg-white\/60{background-color:rgb(255 255 255 / 0.6)}.bg-white\/70{background-color:rgb(255 255 255 / 0.7)}.bg-white\/90{background-color:rgb(255 255 255 / 0.9)}.bg-white\/95{background-color:rgb(255 255 255 / 0.95)}.bg-zinc-100{--tw-bg-opacity:1;background-color:rgb(244 244 245 / var(--tw-bg-opacity, 1))}.bg-black\/60{background-color:rgb(0 0 0 / 0.6)}.bg-black\/\[\.02\]{background-color:rgb(0 0 0 / .02)}.bg-red-600{--tw-bg-opacity:1;background-color:rgb(220 38 38 / var(--tw-bg-opacity, 1))}.bg-gradient-to-b{background-image:linear-gradient(to bottom, var(--tw-gradient-stops))}.to-transparent{--tw-gradient-to:transparent var(--tw-gradient-to-position)}.object-cover{object-fit:cover}.p-3\.5{padding:0.875rem}.p-4{padding:1rem}.p-6{padding:1.5rem}.p-7{padding:1.75rem}.p-1{padding:0.25rem}.p-2{padding:0.5rem}.p-3{padding:0.75rem}.p-5{padding:1.25rem}.px-3{padding-left:0.75rem;padding-right:0.75rem}.px-4{padding-left:1rem;padding-right:1rem}.px-5{padding-left:1.25rem;padding-right:1.25rem}.px-7{padding-left:1.75rem;padding-right:1.75rem}.px-8{padding-left:2rem;padding-right:2rem}.py-1{padding-top:0.25rem;padding-bottom:0.25rem}.py-1\.5{padding-top:0.375rem;padding-bottom:0.375rem}.py-10{padding-top:2.5rem;padding-bottom:2.5rem}.py-14{padding-top:3.5rem;padding-bottom:3.5rem}.py-16{padding-top:4rem;padding-bottom:4rem}.py-2{padding-top:0.5rem;padding-bottom:0.5rem}.py-2\.5{padding-top:0.625rem;padding-bottom:0.625rem}.py-20{padding-top:5rem;padding-bottom:5rem}.py-3{padding-top:0.75rem;padding-bottom:0.75rem}.py-3\.5{padding-top:0.875rem;padding-bottom:0.875rem}.py-4{padding-top:1rem;padding-bottom:1rem}.px-6{padding-left:1.5rem;padding-right:1.5rem}.pr-1{padding-right:0.25rem}.text-left{text-align:left}.text-center{text-align:center}.text-2xl{font-size:1.5rem;line-height:2rem}.text-3xl{font-size:1.875rem;line-height:2.25rem}.text-\[11px\]{font-size:11px}.text-\[13px\]{font-size:13px}.text-\[15px\]{font-size:15px}.text-\[clamp\(26px\2c 4vw\2c 40px\)\]{font-size:clamp(26px,4vw,40px)}.text-\[clamp\(28px\2c 5vw\2c 52px\)\]{font-size:clamp(28px,5vw,52px)}.text-lg{font-size:1.125rem;line-height:1.75rem}.text-sm{font-size:0.875rem;line-height:1.25rem}.text-xl{font-size:1.25rem;line-height:1.75rem}.text-xs{font-size:0.75rem;line-height:1rem}.font-black{font-weight:900}.font-bold{font-weight:700}.font-extrabold{font-weight:800}.font-medium{font-weight:500}.leading-7{line-height:1.75rem}.leading-8{line-height:2rem}.leading-9{line-height:2.25rem}.leading-\[1\.1\]{line-height:1.1}.leading-none{line-height:1}.leading-tight{line-height:1.25}.tracking-widest{letter-spacing:0.1em}.text-\[\#25D366\]{--tw-text-opacity:1;color:rgb(37 211 102 / var(--tw-text-opacity, 1))}.text-\[var\(--gold\)\]{color:var(--gold)}.text-\[var\(--primary\)\]{color:var(--primary)}.text-red-600{--tw-text-opacity:1;color:rgb(220 38 38 / var(--tw-text-opacity, 1))}.text-white{--tw-text-opacity:1;color:rgb(255 255 255 / var(--tw-text-opacity, 1))}.underline{-webkit-text-decoration-line:underline;text-decoration-line:underline}.decoration-dotted{-webkit-text-decoration-style:dotted;text-decoration-style:dotted}.accent-\[var\(--primary\)\]{accent-color:var(--primary)}.opacity-40{opacity:0.4}.opacity-50{opacity:0.5}.opacity-60{opacity:0.6}.opacity-70{opacity:0.7}.opacity-75{opacity:0.75}.opacity-80{opacity:0.8}.opacity-85{opacity:0.85}.shadow-2xl{--tw-shadow:0 25px 50px -12px rgb(0 0 0 / 0.25);--tw-shadow-colored:0 25px 50px -12px var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow)}.shadow-lg{--tw-shadow:0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);--tw-shadow-colored:0 10px 15px -3px var(--tw-shadow-color), 0 4px 6px -4px var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow)}.shadow-sm{--tw-shadow:0 1px 2px 0 rgb(0 0 0 / 0.05);--tw-shadow-colored:0 1px 2px 0 var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow)}.shadow-xl{--tw-shadow:0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);--tw-shadow-colored:0 20px 25px -5px var(--tw-shadow-color), 0 8px 10px -6px var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow)}.shadow-emerald-900\/20{--tw-shadow-color:rgb(6 78 59 / 0.2);--tw-shadow:var(--tw-shadow-colored)}.shadow-emerald-900\/25{--tw-shadow-color:rgb(6 78 59 / 0.25);--tw-shadow:var(--tw-shadow-colored)}.shadow-green-600\/20{--tw-shadow-color:rgb(22 163 74 / 0.2);--tw-shadow:var(--tw-shadow-colored)}.blur-3xl{--tw-blur:blur(64px);filter:var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow)}.backdrop-blur{--tw-backdrop-blur:blur(8px);-webkit-backdrop-filter:var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia);backdrop-filter:var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)}.backdrop-blur-sm{--tw-backdrop-blur:blur(4px);-webkit-backdrop-filter:var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia);backdrop-filter:var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)}.backdrop-blur-xl{--tw-backdrop-blur:blur(24px);-webkit-backdrop-filter:var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia);backdrop-filter:var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)}.transition{transition-property:color, background-color, border-color, fill, stroke, opacity, box-shadow, transform, filter, -webkit-text-decoration-color, -webkit-backdrop-filter;transition-property:color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;transition-property:color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter, -webkit-text-decoration-color, -webkit-backdrop-filter;transition-timing-function:cubic-bezier(0.4, 0, 0.2, 1);transition-duration:150ms}.transition-all{transition-property:all;transition-timing-function:cubic-bezier(0.4, 0, 0.2, 1);transition-duration:150ms}.transition-transform{transition-property:transform;transition-timing-function:cubic-bezier(0.4, 0, 0.2, 1);transition-duration:150ms}.hover\:translate-y-\[-2px\]:hover{--tw-translate-y:-2px;transform:translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y))}.hover\:scale-105:hover{--tw-scale-x:1.05;--tw-scale-y:1.05;transform:translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y))}.hover\:bg-red-50:hover{--tw-bg-opacity:1;background-color:rgb(254 242 242 / var(--tw-bg-opacity, 1))}.hover\:bg-white:hover{--tw-bg-opacity:1;background-color:rgb(255 255 255 / var(--tw-bg-opacity, 1))}.hover\:bg-zinc-100:hover{--tw-bg-opacity:1;background-color:rgb(244 244 245 / var(--tw-bg-opacity, 1))}.hover\:bg-zinc-200:hover{--tw-bg-opacity:1;background-color:rgb(228 228 231 / var(--tw-bg-opacity, 1))}.hover\:bg-\[var\(--sand\)\]:hover{background-color:var(--sand)}.hover\:bg-black\/5:hover{background-color:rgb(0 0 0 / 0.05)}.hover\:text-\[var\(--primary\)\]:hover{color:var(--primary)}.hover\:opacity-100:hover{opacity:1}.hover\:opacity-90:hover{opacity:0.9}.hover\:opacity-95:hover{opacity:0.95}.hover\:shadow-lg:hover{--tw-shadow:0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);--tw-shadow-colored:0 10px 15px -3px var(--tw-shadow-color), 0 4px 6px -4px var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow)}.focus\:outline-none:focus{outline:2px solid transparent;outline-offset:2px}.focus\:ring-2:focus{--tw-ring-offset-shadow:var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color);--tw-ring-shadow:var(--tw-ring-inset) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color);box-shadow:var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000)}.focus\:ring-\[var\(--gold\)\]:focus{--tw-ring-color:var(--gold)}@media (min-width: 640px){.sm\:grid-cols-2{grid-template-columns:repeat(2, minmax(0, 1fr))}}@media (min-width: 768px){.md\:left-5{left:1.25rem}.md\:right-auto{right:auto}.md\:col-span-2{grid-column:span 2 / span 2}.md\:col-span-3{grid-column:span 3 / span 3}.md\:flex{display:flex}.md\:grid-cols-3{grid-template-columns:repeat(3, minmax(0, 1fr))}.md\:grid-cols-5{grid-template-columns:repeat(5, minmax(0, 1fr))}.md\:flex-row{flex-direction:row}.md\:items-start{align-items:flex-start}.md\:items-end{align-items:flex-end}.md\:gap-8{gap:2rem}.md\:p-8{padding:2rem}.md\:py-20{padding-top:5rem;padding-bottom:5rem}.md\:py-24{padding-top:6rem;padding-bottom:6rem}.md\:text-right{text-align:right}.md\:text-4xl{font-size:2.25rem;line-height:2.5rem}.md\:text-xl{font-size:1.25rem;line-height:1.75rem}}@media (min-width: 1024px){.lg\:col-span-2{grid-column:span 2 / span 2}.lg\:col-span-3{grid-column:span 3 / span 3}.lg\:grid-cols-2{grid-template-columns:repeat(2, minmax(0, 1fr))}.lg\:grid-cols-3{grid-template-columns:repeat(3, minmax(0, 1fr))}.lg\:grid-cols-5{grid-template-columns:repeat(5, minmax(0, 1fr))}}</style></head>
+<body class="relative">
+
+<!-- OWNER TOOLBAR -->
+<div id="owner-toolbar" class="hidden fixed top-0 inset-x-0 z-[100] bg-white/95 backdrop-blur-xl border-b border-black/10 shadow-sm transition-transform">
+  <div class="max-w-7xl mx-auto px-3 py-2 flex flex-wrap items-center gap-2 text-[13px]">
+    <div class="flex items-center gap-2 font-black text-[var(--primary)] ml-2">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"></path></svg>
+      لوحة المالك
+    </div>
+    <label class="flex items-center gap-1.5 cursor-pointer bg-zinc-100 px-3 py-1.5 rounded-full hover:bg-zinc-200">
+      <input type="checkbox" id="edit-toggle" class="accent-[var(--primary)]">
+      <span>تعديل مباشر</span>
+    </label>
+    <button id="btn-preview" class="px-3 py-1.5 rounded-full hover:bg-zinc-100">معاينة</button>
+    <button id="btn-save-copy" class="px-3 py-1.5 rounded-full bg-[var(--primary)] text-white hover:opacity-90">حفظ نسخة</button>
+    <button id="btn-panel" class="px-3 py-1.5 rounded-full hover:bg-zinc-100">لوحة تحكم</button>
+    <div class="mr-auto flex items-center gap-1">
+      <button id="btn-undo" title="تراجع" class="w-8 h-8 grid place-items-center rounded-full hover:bg-zinc-100">↩</button>
+      <button id="btn-redo" title="إعادة" class="w-8 h-8 grid place-items-center rounded-full hover:bg-zinc-100">↪</button>
+      <button id="btn-logout" class="px-3 py-1.5 rounded-full text-red-600 hover:bg-red-50 mr-1">خروج</button>
+    </div>
+  </div>
+</div>
+
+<div id="site-wrapper" class="transition-all">
+<!-- HEADER -->
+<header class="sticky top-0 z-40 bg-[var(--sand)]/80 backdrop-blur-xl border-b border-black/5">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-2xl bg-[var(--primary)] grid place-items-center text-white font-black shadow-lg shadow-emerald-900/20">د</div>
+      <div>
+        <div class="font-extrabold text-xl leading-none text-[var(--primary)]">مخاور دار الأصالة</div>
+        <div class="text-[11px] opacity-60 -mt-0.5">كلباء • منذ 2015</div>
+      </div>
+    </div>
+    <nav class="hidden md:flex items-center gap-7 text-[15px] font-medium">
+      <a href="#about" class="hover:text-[var(--primary)]">عن الدار</a>
+      <a href="#products" class="hover:text-[var(--primary)]">المتجر</a>
+      <a href="#features" class="hover:text-[var(--primary)]">لماذا نحن</a>
+      <a href="#contact" class="hover:text-[var(--primary)]">تواصل</a>
+    </nav>
+    <a href="#products" class="bg-[var(--primary)] text-white px-5 py-2.5 rounded-full font-bold text-sm shadow-lg shadow-emerald-900/20 hover:opacity-95">تسوقي الآن</a>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="relative overflow-hidden">
+  <div class="absolute inset-0 bg-gradient-to-b from-[var(--gold)]/10 to-transparent pointer-events-none"></div>
+  <div class="max-w-7xl mx-auto px-4 py-14 md:py-20 grid lg:grid-cols-2 gap-10 items-center">
+    <div class="relative z-10">
+      <div class="inline-flex items-center gap-2 bg-white/70 border border-[var(--gold)]/30 px-3 py-1 rounded-full text-xs mb-5">
+        <span class="w-2 h-2 rounded-full bg-[var(--primary)] animate-pulse"></span>
+        خياطة يدوية في كلباء
+      </div>
+      <h1 id="hero-title" class="editable text-[clamp(28px,5vw,52px)] font-black leading-[1.1] text-[var(--primary)]">فخامة المخور الإماراتي من كلباء إلى العالم</h1>
+      <p id="hero-subtitle" class="editable mt-5 text-lg md:text-xl leading-8 opacity-80 max-w-xl">ننسج الأصالة بخيوط الفخامة. مخاور مطرزة يدوياً بأجود أنواع الحرير والكريب، بتفاصيل ذهبية تعكس ذوق المرأة الإماراتية الأصيلة.</p>
+      <div class="mt-8 flex flex-wrap gap-3">
+        <a href="#products" class="bg-[var(--primary)] text-white px-7 py-3.5 rounded-full font-bold shadow-xl shadow-emerald-900/25 hover:translate-y-[-2px] transition">استكشفي التشكيلة</a>
+        <a id="whatsapp-hero" href="#" target="_blank" class="group border-2 border-[var(--gold)] px-7 py-3.5 rounded-full font-bold text-[var(--primary)] hover:bg-[var(--gold)]/10 transition flex items-center gap-2">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="text-[#25D366]"><path d="M20.5 3.5A11.8 11.8 0 0 12 0C5.4 0 0 5.4 0 12c0 2.1.5 4.1 1.5 5.9L0 24l6.3-1.6c1.7.9 3.6 1.4 5.7 1.4 6.6 0 12-5.4 12-12 0-3.2-1.2-6.2-3.5-8.3zM12 22c-1.8 0-3.5-.5-5-1.3l-.4-.2-3.7 1 1-3.6-.3-.4A9.9 9.9 0 0 1 2 12C2 6.5 6.5 2 12 2c2.7 0 5.2 1 7.1 2.9A9.9 0 0 1 22 12c0 5.5-4.5 10-10 10zm5.5-7.5c-.3-.1-1.8-.9-2.1-1-.3-.1-.5-.1-.7.1-.2.3-.8 1-.9 1.2-.2.2-.3.2-.6.1s-1.2-.4-2.3-1.4c-.9-.8-1.5-1.7-1.6-2-.1-.3 0-.5.1-.6l.5-.6c.1-.2.2-.3.2-.5s0-.4 0-.5c0-.1-.7-1.7-1-2.3-.2-.5-.5-.5-.7-.5h-.6c-.2 0-.5.1-.7.3-.2.2-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.1 4.9 4.3 1.9.8 2.6.9 3.5.7.5-.1 1.8-.7 2-1.4.2-.7.2-1.3.1-1.4 0-.1-.2-.2-.5-.3z"></path></svg>
+          طلب عبر واتساب
+        </a>
+      </div>
+      <div class="mt-10 flex items-center gap-6 text-sm">
+        <div class="flex -space-x-2">
+          <img src="https://i.pravatar.cc/40?img=32" class="w-8 h-8 rounded-full border-2 border-[var(--sand)]">
+          <img src="https://i.pravatar.cc/40?img=5" class="w-8 h-8 rounded-full border-2 border-[var(--sand)]">
+          <img src="https://i.pravatar.cc/40?img=16" class="w-8 h-8 rounded-full border-2 border-[var(--sand)]">
+        </div>
+        <div class="opacity-70">+1200 عميلة راضية في الإمارات</div>
+      </div>
+    </div>
+    <div class="relative">
+      <div class="absolute -inset-6 bg-[var(--gold)]/20 blur-3xl rounded-[3rem]"></div>
+      <img src="https://images.unsplash.com/photo-1594739299330-6bf9c96d3e83?q=80&amp;w=1200&amp;auto=format&amp;fit=crop" alt="مخور إماراتي فاخر" class="relative z-10 w-full h-[520px] object-cover rounded-[2.5rem] shadow-2xl">
+      <div class="absolute bottom-6 right-6 z-20 bg-white/90 backdrop-blur p-4 rounded-2xl shadow-xl border border-white">
+        <div class="text-xs opacity-60">توصيل</div>
+        <div class="font-bold text-[var(--primary)]">خلال 24-48 ساعة</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ABOUT -->
+<section id="about" class="py-16 md:py-24">
+  <div class="max-w-6xl mx-auto px-4 grid md:grid-cols-5 gap-10 items-center">
+    <div class="md:col-span-3">
+      <h2 class="text-3xl md:text-4xl font-black text-[var(--primary)] mb-4">حكاية دار من قلب كلباء</h2>
+      <p id="about-text" class="editable text-lg leading-9 opacity-85">دار الأصالة علامة إماراتية من مدينة كلباء، متخصصة في تصميم وتفصيل المخاور الفاخرة. نجمع بين التراث الأصيل واللمسة العصرية، مع خياطة يدوية دقيقة وتطريز فاخر يعكس ذوق المرأة الإماراتية. كل قطعة تُحاك بعناية، من اختيار القماش إلى اللمسة الأخيرة.</p>
+      <div class="mt-8 grid grid-cols-3 gap-4 max-w-md">
+        <div class="bg-white p-4 rounded-2xl text-center shadow-sm border border-black/5">
+          <div class="text-2xl font-black text-[var(--primary)]">100%</div>
+          <div class="text-xs opacity-70">خياطة يدوية</div>
+        </div>
+        <div class="bg-white p-4 rounded-2xl text-center shadow-sm border border-black/5">
+          <div class="text-2xl font-black text-[var(--primary)]">2015</div>
+          <div class="text-xs opacity-70">سنة التأسيس</div>
+        </div>
+        <div class="bg-white p-4 rounded-2xl text-center shadow-sm border border-black/5">
+          <div class="text-2xl font-black text-[var(--primary)]">24h</div>
+          <div class="text-xs opacity-70">توصيل سريع</div>
+        </div>
+      </div>
+    </div>
+    <div class="md:col-span-2 relative">
+      <div class="aspect-[4/5] rounded-[2rem] overflow-hidden shadow-xl">
+        <img src="https://images.unsplash.com/photo-1612336307429-8a898d10e223?q=80&amp;w=800&amp;auto=format" class="w-full h-full object-cover" alt="">
+      </div>
+      <div class="absolute -bottom-5 -left-5 bg-[var(--primary)] text-white px-5 py-3 rounded-2xl shadow-lg">
+        <div class="text-sm opacity-80">صنع بفخر في</div>
+        <div class="font-bold">كلباء - الشارقة</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features" class="py-14 bg-white/70 border-y border-black/5">
+  <div class="max-w-6xl mx-auto px-4 grid md:grid-cols-3 gap-6">
+    <div class="bg-[var(--sand)] p-7 rounded-3xl border border-[var(--gold)]/20 hover:shadow-lg transition">
+      <div class="w-12 h-12 rounded-2xl bg-[var(--primary)]/10 grid place-items-center mb-4 text-2xl">🧵</div>
+      <h3 class="font-extrabold text-xl mb-2 text-[var(--primary)]">خياطة يدوية</h3>
+      <p class="opacity-75 leading-7">كل مخور يُطرز يدوياً من قبل حرفيات إماراتيات بخبرة سنوات، مع اهتمام بأدق التفاصيل.</p>
+    </div>
+    <div class="bg-[var(--sand)] p-7 rounded-3xl border border-[var(--gold)]/20 hover:shadow-lg transition">
+      <div class="w-12 h-12 rounded-2xl bg-[var(--primary)]/10 grid place-items-center mb-4 text-2xl">🚚</div>
+      <h3 class="font-extrabold text-xl mb-2 text-[var(--primary)]">توصيل لكل الإمارات</h3>
+      <p class="opacity-75 leading-7">من كلباء إلى أبوظبي ودبي والشارقة وكل الإمارات خلال 24-48 ساعة مع تغليف فاخر.</p>
+    </div>
+    <div class="bg-[var(--sand)] p-7 rounded-3xl border border-[var(--gold)]/20 hover:shadow-lg transition">
+      <div class="w-12 h-12 rounded-2xl bg-[var(--primary)]/10 grid place-items-center mb-4 text-2xl">💳</div>
+      <h3 class="font-extrabold text-xl mb-2 text-[var(--primary)]">دفع عند الاستلام</h3>
+      <p class="opacity-75 leading-7">تسوقي براحة تامة. ادفعي نقداً أو بالبطاقة عند الاستلام، مع إمكانية القياس والتعديل.</p>
+    </div>
+  </div>
+</section>
+
+<!-- PRODUCTS -->
+<section id="products" class="py-20">
+  <div class="max-w-7xl mx-auto px-4">
+    <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
+      <div>
+        <h2 class="text-3xl md:text-4xl font-black text-[var(--primary)]">تشكيلتنا المختارة</h2>
+        <p class="opacity-70 mt-2">مخاور فاخرة جاهزة، أو نصمم لكِ حسب الطلب</p>
+      </div>
+      <div class="text-sm bg-[var(--gold)]/15 text-[var(--primary)] px-4 py-2 rounded-full font-bold">شحن مجاني للطلبات فوق 500 درهم</div>
+    </div>
+    <div id="products-grid" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8"></div>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section class="py-16 bg-white/60 border-y border-black/5">
+  <div class="max-w-6xl mx-auto px-4">
+    <h2 class="text-3xl font-black text-center text-[var(--primary)] mb-12">آراء عميلاتنا</h2>
+    <div class="grid md:grid-cols-3 gap-6">
+      <div class="bg-[var(--sand)] p-6 rounded-3xl shadow-sm border border-black/5">
+        <div class="flex gap-1 text-[var(--gold)] mb-3">★★★★★</div>
+        <p class="leading-7">"الخياطة نظيفة والتطريز يجنن، وصلني في نفس اليوم لكلباء. شكراً دار الأصالة!"</p>
+        <div class="mt-4 font-bold">— مريم، كلباء</div>
+      </div>
+      <div class="bg-[var(--sand)] p-6 rounded-3xl shadow-sm border border-black/5">
+        <div class="flex gap-1 text-[var(--gold)] mb-3">★★★★★</div>
+        <p class="leading-7">"طلبت تفصيل خاص، والنتيجة فاقت توقعاتي. فخامة وستر."</p>
+        <div class="mt-4 font-bold">— شيخة، دبي</div>
+      </div>
+      <div class="bg-[var(--sand)] p-6 rounded-3xl shadow-sm border border-black/5">
+        <div class="flex gap-1 text-[var(--gold)] mb-3">★★★★★</div>
+        <p class="leading-7">"تعامل راقي وخامات أصلية. بنصح كل خواتي فيهم."</p>
+        <div class="mt-4 font-bold">— عائشة، الشارقة</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CONTACT -->
+<section id="contact" class="py-20">
+  <div class="max-w-4xl mx-auto px-4 text-center">
+    <div class="inline-flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-sm border mb-5">
+      <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+      <span class="text-sm">متاحون الآن للرد</span>
+    </div>
+    <h2 class="text-[clamp(26px,4vw,40px)] font-black text-[var(--primary)] leading-tight">جاهزة لمخوركِ الخاص من كلباء؟</h2>
+    <p class="mt-4 text-lg opacity-80 max-w-2xl mx-auto">ارسلي لنا القياسات والتصميم المطلوب على واتساب، وحرفياتنا يبدأن التنفيذ فوراً مع إرسال صور مراحل العمل.</p>
+    <div class="mt-8 flex flex-wrap justify-center gap-3">
+      <a id="whatsapp-main" href="#" target="_blank" class="bg-[#25D366] text-white px-8 py-4 rounded-full font-extrabold text-lg shadow-xl shadow-green-600/20 hover:translate-y-[-2px] transition flex items-center gap-2">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M20.5 3.5A11.8 11.8 0 0 0 12 0C5.4 0 0 5.4 0 12c0 2.1.5 4.1 1.5 5.9L0 24l6.3-1.6c1.7.9 3.6 1.4 5.7 1.4 6.6 0 12-5.4 12-12 0-3.2-1.2-6.2-3.5-8.3zM12 22c-1.8 0-3.5-.5-5-1.3l-.4-.2-3.7 1 1-3.6-.3-.4A9.9 9.9 0 0 1 2 12C2 6.5 6.5 2 12 2c2.7 0 5.2 1 7.1 2.9A9.9 9.9 0 0 1 22 12c0 5.5-4.5 10-10 10zm5.5-7.5c-.3-.1-1.8-.9-2.1-1-.3-.1-.5-.1-.7.1-.2.3-.8 1-.9 1.2-.2.2-.3.2-.6.1s-1.2-.4-2.3-1.4c-.9-.8-1.5-1.7-1.6-2-.1-.3 0-.5.1-.6l.5-.6c.1-.2.2-.3.2-.5s0-.4 0-.5c0-.1-.7-1.7-1-2.3-.2-.5-.5-.5-.7-.5h-.6c-.2 0-.5.1-.7.3-.2.2-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.1 4.9 4.3 1.9.8 2.6.9 3.5.7.5-.1 1.8-.7 2-1.4.2-.7.2-1.3.1-1.4 0-.1-.2-.2-.5-.3z"></path></svg>
+        تواصلي واتساب الآن
+      </a>
+      <a href="tel:+971" class="border-2 border-black/10 px-8 py-4 rounded-full font-bold hover:bg-white transition">اتصال هاتفي</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="py-10 border-t border-black/10 bg-white/50">
+  <div class="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-4">
+    <div class="text-center md:text-right">
+      <div class="font-black text-[var(--primary)]">مخاور دار الأصالة © 2025</div>
+      <div class="text-xs opacity-60 mt-1">صنع بحب في كلباء - الشارقة، الإمارات العربية المتحدة</div>
+    </div>
+    <div class="flex items-center gap-5 text-sm opacity-70">
+      <a href="#" class="hover:text-[var(--primary)]">سياسة الخصوصية</a>
+      <a href="#" class="hover:text-[var(--primary)]">الاسترجاع</a>
+      <button id="owner-login-link" class="text-[11px] opacity-40 hover:opacity-100 transition underline decoration-dotted">دخول المالك</button>
+    </div>
+  </div>
+</footer>
+</div>
+
+<!-- FLOAT WHATSAPP -->
+<a id="whatsapp-float" href="#" target="_blank" class="fixed bottom-5 left-5 z-30 w-14 h-14 rounded-full bg-[#25D366] grid place-items-center shadow-2xl hover:scale-105 transition">
+  <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M20.5 3.5A11.8 0 0 0 12 0C5.4 0 0 5.4 0 12c0 2.1.5 4.1 1.5 5.9L0 24l6.3-1.6c1.7.9 3.6 1.4 5.7 1.4 6.6 0 12-5.4 12-12 0-3.2-1.2-6.2-3.5-8.3zM12 22c-1.8 0-3.5-.5-5-1.3l-.4-.2-3.7 1 1-3.6-.3-.4A9.9 9.9 0 0 1 2 12C2 6.5 6.5 2 12 2c2.7 0 5.2 1 7.1 2.9A9.9 9.9 0 0 1 22 12c0 5.5-4.5 10-10 10zm5.5-7.5c-.3-.1-1.8-.9-2.1-1-.3-.1-.5-.1-.7.1-.2.3-.8 1-.9 1.2-.2.2-.3.2-.6.1s-1.2-.4-2.3-1.4c-.9-.8-1.5-1.7-1.6-2-.1-.3 0-.5.1-.6l.5-.6c.1-.2.2-.3.2-.5s0-.4 0-.5c0-.1-.7-1.7-1-2.3-.2-.5-.5-.5-.7-.5h-.6c-.2 0-.5.1-.7.3-.2.2-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.1 4.9 4.3 1.9.8 2.6.9 3.5.7.5-.1 1.8-.7 2-1.4.2-.7.2-1.3.1-1.4 0-.1-.2-.2-.5-.3z"></path></svg>
+</a>
+
+<!-- LOGIN MODAL -->
+<div id="login-modal" class="hidden fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm grid place-items-center p-4">
+  <div class="bg-[var(--sand)] w-full max-w-sm rounded-[2rem] shadow-2xl p-7 border border-white/50">
+    <h3 class="text-2xl font-black text-center text-[var(--primary)]">دخول المالك</h3>
+    <p class="text-center text-sm opacity-70 mt-1 mb-6">ادخلي كلمة المرور لإدارة المتجر</p>
+    <input id="password-input" type="password" placeholder="••••••••" class="w-full text-center text-lg tracking-widest bg-white border border-black/10 rounded-2xl p-3.5 focus:outline-none focus:ring-2 focus:ring-[var(--gold)]">
+    <div class="grid grid-cols-2 gap-3 mt-4">
+      <button id="login-cancel" class="py-3 rounded-2xl font-bold border border-black/10 hover:bg-white">إلغاء</button>
+      <button id="login-btn" class="py-3 rounded-2xl font-bold bg-[var(--primary)] text-white hover:opacity-95">دخول</button>
+    </div>
+    <p class="text-[11px] text-center mt-4 opacity-50">كلمة المرور الافتراضية: makhawir2026</p>
+  </div>
+</div>
+
+<!-- ADMIN PANEL -->
+<div id="admin-panel" class="hidden fixed inset-0 z-[150] bg-black/60 backdrop-blur-sm p-4 md:p-8 overflow-auto">
+  <div class="bg-[var(--sand)] max-w-6xl mx-auto rounded-[2rem] shadow-2xl border border-white/50 flex flex-col max-h-[90vh]">
+    <div class="flex items-center justify-between p-5 border-b border-black/10">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-[var(--primary)] grid place-items-center text-white">⚙️</div>
+        <h3 class="text-xl font-black">لوحة تحكم دار الأصالة</h3>
+      </div>
+      <button id="panel-close" class="w-9 h-9 grid place-items-center rounded-full hover:bg-black/5 text-xl">✕</button>
+    </div>
+    <div class="flex gap-1 p-2 border-b border-black/5 bg-black/[.02] overflow-x-auto no-scrollbar">
+      <button data-tab="products" class="tab-btn active">المنتجات</button>
+      <button data-tab="content" class="tab-btn">المحتوى</button>
+      <button data-tab="design" class="tab-btn">التصميم</button>
+      <button data-tab="settings" class="tab-btn">الإعدادات</button>
+    </div>
+    <div class="p-5 overflow-auto">
+      <!-- Products -->
+      <div id="tab-products">
+        <div class="grid lg:grid-cols-5 gap-6">
+          <div class="lg:col-span-2 bg-white rounded-2xl p-5 border border-black/5 h-fit">
+            <h4 class="font-bold mb-3">إضافة / تعديل منتج</h4>
+            <form id="product-form" class="space-y-3">
+              <input id="p-name" required="" placeholder="اسم المنتج" class="w-full p-3 rounded-xl border bg-[var(--sand)]/50">
+              <input id="p-price" required="" type="number" placeholder="السعر بالدرهم" class="w-full p-3 rounded-xl border bg-[var(--sand)]/50">
+              <input id="p-image" required="" placeholder="رابط الصورة" class="w-full p-3 rounded-xl border bg-[var(--sand)]/50">
+              <textarea id="p-desc" placeholder="وصف قصير" rows="2" class="w-full p-3 rounded-xl border bg-[var(--sand)]/50"></textarea>
+              <button class="w-full bg-[var(--primary)] text-white py-3 rounded-xl font-bold">حفظ المنتج</button>
+              <button type="button" id="p-clear" class="w-full py-2 text-sm opacity-60 hover:opacity-100">مسح الحقول</button>
+            </form>
+          </div>
+          <div class="lg:col-span-3">
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="font-bold">المنتجات الحالية (<span id="p-count">0</span>)</h4>
+            </div>
+            <div id="products-list" class="space-y-2 max-h-[420px] overflow-auto pr-1"></div>
+          </div>
+        </div>
+      <!-- Content -->
+      <div id="tab-content" class="hidden max-w-3xl">
+        <div class="space-y-4">
+          <div><label class="text-sm font-bold">عنوان الهيرو</label><input id="heroTitleInput" class="w-full mt-1 p-3 rounded-xl border bg-white"></div>
+          <div><label class="text-sm font-bold">وصف الهيرو</label><textarea id="heroSubtitleInput" rows="3" class="w-full mt-1 p-3 rounded-xl border bg-white"></textarea></div>
+          <div><label class="text-sm font-bold">نص "عن الدار"</label><textarea id="aboutInput" rows="4" class="w-full mt-1 p-3 rounded-xl border bg-white"></textarea></div>
+          <div><label class="text-sm font-bold">رقم واتساب (مع رمز الدولة)</label><input id="whatsappInput" placeholder="9715xxxxxxxx" class="w-full mt-1 p-3 rounded-xl border bg-white text-left" dir="ltr"></div>
+          <button id="save-content" class="bg-[var(--primary)] text-white px-6 py-3 rounded-xl font-bold">حفظ المحتوى</button>
+        </div>
+      </div>
+      <!-- Design -->
+      <div id="tab-design" class="hidden max-w-xl">
+        <div class="grid grid-cols-2 gap-5">
+          <div><label class="text-sm font-bold">اللون الأساسي</label><input type="color" id="color-primary" class="w-full h-12 mt-1 rounded-xl border bg-white p-1"></div>
+          <div><label class="text-sm font-bold">اللون الذهبي</label><input type="color" id="color-gold" class="w-full h-12 mt-1 rounded-xl border bg-white p-1"></div>
+          <div class="col-span-2"><label class="text-sm font-bold">الخط</label><select id="font-select" class="w-full mt-1 p-3 rounded-xl border bg-white"><option value="Cairo">Cairo</option><option value="Tajawal">Tajawal</option></select></div>
+        </div>
+        <button id="save-design" class="mt-5 bg-[var(--primary)] text-white px-6 py-3 rounded-xl font-bold">حفظ التصميم</button>
+      </div>
+      <!-- Settings -->
+      <div id="tab-settings" class="hidden max-w-xl space-y-6">
+        <div class="bg-white p-5 rounded-2xl border">
+          <h4 class="font-bold mb-3">تغيير كلمة المرور</h4>
+          <input id="old-pass" type="password" placeholder="الحالية" class="w-full p-3 rounded-xl border mb-2 bg-[var(--sand)]/50">
+          <input id="new-pass" type="password" placeholder="الجديدة" class="w-full p-3 rounded-xl border mb-3 bg-[var(--sand)]/50">
+          <button id="change-pass-btn" class="bg-[var(--primary)] text-white px-5 py-2.5 rounded-xl font-bold">تغيير</button>
+        </div>
+        <div class="bg-white p-5 rounded-2xl border">
+          <h4 class="font-bold mb-3">النسخ الاحتياطي</h4>
+          <div class="flex flex-wrap gap-2">
+            <button id="export-btn" class="px-4 py-2.5 rounded-xl border hover:bg-[var(--sand)] font-bold">تصدير JSON</button>
+            <label class="px-4 py-2.5 rounded-xl border hover:bg-[var(--sand)] font-bold cursor-pointer">استيراد<input id="import-input" type="file" accept=".json" hidden=""></label>
+            <button id="reset-btn" class="px-4 py-2.5 rounded-xl bg-red-600 text-white font-bold">إعادة تعيين</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TOASTS -->
+<div id="toast-container" class="fixed bottom-5 inset-x-0 md:left-5 md:right-auto z-[300] flex flex-col gap-2 items-center md:items-start px-4 pointer-events-none"></div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => document.querySelectorAll(s);
+
+  const DEFAULT_DATA = {
+    password: "makhawir2026",
+    hero: {
+      title: "فخامة المخور الإماراتي من كلباء إلى العالم",
+      subtitle: "ننسج الأصالة بخيوط الفخامة. مخاور مطرزة يدوياً بأجود أنواع الحرير والكريب، بتفاصيل ذهبية تعكس ذوق المرأة الإماراتية الأصيلة."
+    },
+    about: "دار الأصالة علامة إماراتية من مدينة كلباء، متخصصة في تصميم وتفصيل المخاور الفاخرة. نجمع بين التراث الأصيل واللمسة العصرية، مع خياطة يدوية دقيقة وتطريز فاخر يعكس ذوق المرأة الإماراتية. كل قطعة تُحاك بعناية، من اختيار القماش إلى اللمسة الأخيرة.",
+    whatsapp: "971501234567",
+    colors: { primary: "#0E5E4F", gold: "#C9A86B" },
+    font: "Cairo",
+    products: [
+      {id:1, name:"مخور حرير ملكي مطرز", price:590, image:"https://images.unsplash.com/photo-1612336307429-8a898d10e223?q=80&w=800&auto=format", description:"تطريز ذهبي يدوي على حرير فاخر"},
+      {id:2, name:"مخور كلباء الفاخر", price:650, image:"https://images.unsplash.com/photo-1596462502278-27bfdc403348?q=80&w=800&auto=format", description:"كريب أصلي مع لمسة عصرية"},
+      {id:3, name:"مخور الأصالة الأسود", price:480, image:"https://images.unsplash.com/photo-1594739299330-6bf9c96d3e83?q=80&w=800&auto=format", description:"تصميم كلاسيكي للمناسبات"},
+      {id:4, name:"مخور لؤلؤ الإمارات", price:720, image:"https://images.unsplash.com/photo-1583669456776-d5c5715f3d48?q=80&w=800&auto=format", description:"مطرز باللؤلؤ الطبيعي"},
+      {id:5, name:"مخور ذهبي ملكي", price:550, image:"https://images.unsplash.com/photo-1564257639014-7192854d0e33?q=80&w=800&auto=format", description:"خيوط ذهبية براقة"},
+      {id:6, name:"مخور العيد الفاخر", price:890, image:"https://images.unsplash.com/photo-1585487000160-6ebcfceb0d03?q=80&w=800&auto=format", description:"قطعة خاصة للمناسبات الكبيرة"}
+    ],
+    contentEdits: {}
+  };
+
+  let data = {};
+  let history = [];
+  let historyIndex = -1;
+  let isEditMode = false;
+
+  function showToast(msg, type='ok'){
+    const cont = $('#toast-container');
+    const el = document.createElement('div');
+    el.className = `pointer-events-auto px-5 py-3 rounded-2xl shadow-xl text-white font-bold transition transform translate-y-2 opacity-0 ${type==='err'?'bg-red-600':'bg-[var(--primary)]'}`;
+    el.textContent = msg;
+    cont.appendChild(el);
+    requestAnimationFrame(()=>{ el.classList.remove('translate-y-2','opacity-0'); });
+    setTimeout(()=>{ el.classList.add('opacity-0','translate-y-2'); setTimeout(()=>el.remove(),300); }, 2600);
+  }
+
+  function loadData(){
+    try{
+      const stored = localStorage.getItem('makhawir_data');
+      if(window.__DATA__){
+        data = {...DEFAULT_DATA, ...window.__DATA__};
+        if(stored){ const s=JSON.parse(stored); data = {...data, ...s}; }
+      } else {
+        data = stored ? JSON.parse(stored) : structuredClone(DEFAULT_DATA);
+      }
+    }catch(e){ console.error(e); data = structuredClone(DEFAULT_DATA); }
+    pushHistory(true);
+  }
+
+  function pushHistory(initial=false){
+    const snap = JSON.stringify(data);
+    if(!initial && history[historyIndex]===snap) return;
+    history = history.slice(0, historyIndex+1);
+    history.push(snap);
+    historyIndex = history.length-1;
+    if(history.length>50){ history.shift(); historyIndex--; }
+  }
+
+  function saveData(push=true){
+    try{
+      if(push) pushHistory();
+      localStorage.setItem('makhawir_data', JSON.stringify(data));
+    }catch(e){ showToast('فشل الحفظ', 'err'); }
+  }
+
+  function applyData(){
+    document.documentElement.style.setProperty('--primary', data.colors.primary);
+    document.documentElement.style.setProperty('--gold', data.colors.gold);
+    document.body.style.fontFamily = `'${data.font}', Cairo, Tajawal, sans-serif`;
+    
+    $('#hero-title').innerHTML = data.hero.title;
+    $('#hero-subtitle').innerHTML = data.hero.subtitle;
+    $('#about-text').innerHTML = data.about;
+    
+    const waText = encodeURIComponent('مرحبا دار الأصالة، أرغب بالاستفسار');
+    const waLink = `https://wa.me/${data.whatsapp}?text=${waText}`;
+    ['whatsapp-hero','whatsapp-main','whatsapp-float'].forEach(id=>{ const a=$('#'+id); if(a) a.href=waLink; });
+    
+    Object.entries(data.contentEdits||{}).forEach(([id,val])=>{ const el=document.getElementById(id); if(el) el.innerHTML=val; });
+  }
+
+  function renderProducts(){
+    const grid = $('#products-grid');
+    grid.innerHTML = data.products.map(p=>`
+      <div class="group bg-white rounded-[2rem] overflow-hidden shadow-sm border border-black/5 hover:shadow-xl hover:-translate-y-1 transition">
+        <div class="relative h-[340px] overflow-hidden">
+          <img src="${p.image}" alt="${p.name}" class="w-full h-full object-cover group-hover:scale-105 transition duration-700">
+          <div class="absolute top-3 left-3 bg-white/90 backdrop-blur px-3 py1.5 rounded-full text-xs font-bold text-[var(--primary)]">جاهز للتوصيل</div>
+        </div>
+        <div class="p-5">
+          <h3 class="font-extrabold text-xl">${p.name}</h3>
+          <p class="text-sm opacity-70 mt-1 h-10">${p.description||''}</p>
+          <div class="flex items-center justify-between mt-4">
+            <div class="text-2xl font-black text-[var(--primary)]">${p.price} <span class="text-sm font-bold opacity-70">AED</span></div>
+            <a href="https://wa.me/${data.whatsapp}?text=${encodeURIComponent('أرغب بطلب '+p.name+' - '+p.price+' درهم')}" target="_blank" class="bg-[var(--gold)]/20 hover:bg-[var(--gold)]/30 text-[var(--primary)] px-4 py-2 rounded-full font-bold text-sm transition">اطلبيه الآن</a>
+          </div>
+        </div>
+      </div>
+    `).join('');
+    $('#p-count').textContent = data.products.length;
+    renderProductsList();
+  }
+
+  function renderProductsList(){
+    const list = $('#products-list');
+    list.innerHTML = data.products.map(p=>`
+      <div class="flex items-center gap-3 bg-white p-3 rounded-xl border">
+        <img src="${p.image}" class="w-14 h-14 rounded-lg object-cover">
+        <div class="flex-1 min-w-0">
+          <div class="font-bold truncate">${p.name}</div>
+          <div class="text-xs opacity-60">${p.price} AED</div>
+        </div>
+        <button data-id="${p.id}" class="edit-p px3 py-1.5 text-xs rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100">تعديل</button>
+        <button data-id="${p.id}" class="del-p px-3 py-1.5 text-xs rounded-lg bg-red-50 text-red-700 hover:bg-red-100">حذف</button>
+      </div>
+    `).join('');
+    $$('.edit-p').forEach(b=>b.onclick=()=>editProduct(+b.dataset.id));
+    $$('.del-p').forEach(b=>b.onclick=()=>delProduct(+b.dataset.id));
+  }
+
+  function editProduct(id){
+    const p = data.products.find(x=>x.id===id);
+    if(!p) return;
+    $('#p-name').value = p.name;
+    $('#p-price').value = p.price;
+    $('#p-image').value = p.image;
+    $('#p-desc').value = p.description||'';
+    $('#product-form').dataset.editing = id;
+    switchTab('products');
+    showToast('جاري تعديل المنتج');
+  }
+  function delProduct(id){
+    if(!confirm('حذف المنتج؟')) return;
+    data.products = data.products.filter(x=>x.id!==id);
+    saveData(); renderProducts(); showToast('تم الحذف');
+  }
+
+  function toggleEditMode(on){
+    isEditMode = on;
+    $$('.editable').forEach(el=>{
+      el.contentEditable = on;
+      el.classList.toggle('ring-2', on);
+      el.classList.toggle('ring-[var(--gold)]/40', on);
+    });
+    showToast(on?'وضع التعديل مفعل':'تم إيقاف التعديل');
+  }
+
+  function handleEditableBlur(e){
+    const el = e.target;
+    if(!el.classList.contains('editable') || !isEditMode) return;
+    if(el.id){
+      data.contentEdits[el.id] = el.innerHTML;
+      if(el.id==='hero-title') data.hero.title = el.innerText.trim();
+      if(el.id==='hero-subtitle') data.hero.subtitle = el.innerText.trim();
+      if(el.id==='about-text') data.about = el.innerText.trim();
+      saveData();
+    }
+  }
+
+  function showLogin(show){
+    $('#login-modal').classList.toggle('hidden', !show);
+    if(show) setTimeout(()=>$('#password-input').focus(),50);
+  }
+  function showToolbar(show){
+    $('#owner-toolbar').classList.toggle('hidden', !show);
+    $('#site-wrapper').style.paddingTop = show ? '48px' : '0';
+  }
+  function checkSession(){ if(sessionStorage.getItem('owner')==='1'){ showToolbar(true); } }
+
+  function handleLogin(){
+    const v = $('#password-input').value.trim();
+    if(v === data.password){
+      sessionStorage.setItem('owner','1');
+      showLogin(false); showToolbar(true); showToast('مرحباً بك في لوحة التحكم');
+      $('#password-input').value='';
+    }else{ showToast('كلمة المرور غير صحيحة','err'); }
+  }
+
+  function logout(){ sessionStorage.removeItem('owner'); showToolbar(false); toggleEditMode(false); $('#edit-toggle').checked=false; showToast('تم تسجيل الخروج'); }
+
+  function togglePreview(){
+    const tb = $('#owner-toolbar');
+    const hidden = tb.classList.contains('-translate-y-full');
+    tb.classList.toggle('-translate-y-full', !hidden);
+    $('#admin-panel').classList.add('hidden');
+    if(isEditMode){ toggleEditMode(false); $('#edit-toggle').checked=false; }
+    showToast(hidden?'تم إظهار الشريط':'وضع المعاينة');
+  }
+
+  function saveCopy(){
+    try{
+      const clone = JSON.parse(JSON.stringify(data));
+      const dataScript = `<script>window.__DATA__=${JSON.stringify(clone)}<\/script>`;
+      let html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+      html = html.replace('<script>(function(){document.addEventListener("click",function(e){var a=e.target.closest("[data-product-id]");if(!a)return;e.preventDefault();var pid=a.getAttribute("data-product-id");if(pid)parent.postMessage({type:"ecto-artifact-link-click",productId:pid},"*")})})();</script>
+', dataScript + '\n');
+      const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'makhawir-dar-alasala-' + new Date().toISOString().slice(0,10) + '.html';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(a.href);
+      showToast('تم تحميل نسخة HTML');
+    }catch(e){ console.error(e); showToast('فشل حفظ النسخة','err'); }
+  }
+
+  function switchTab(tab){
+    $$('.tab-btn').forEach(b=&gt;b.classList.toggle('active', b.dataset.tab===tab));
+    ['products','content','design','settings'].forEach(t=&gt;$('#tab-'+t).classList.toggle('hidden', t!==tab));
+    if(tab==='content'){ $('#heroTitleInput').value=data.hero.title; $('#heroSubtitleInput').value=data.hero.subtitle; $('#aboutInput').value=data.about; $('#whatsappInput').value=data.whatsapp; }
+    if(tab==='design'){ $('#color-primary').value=data.colors.primary; $('#color-gold').value=data.colors.gold; $('#font-select').value=data.font; }
+  }
+
+  function undo(){ if(historyIndex&gt;0){ historyIndex--; data=JSON.parse(history[historyIndex]); saveData(false); applyData(); renderProducts(); showToast('تراجع'); } }
+  function redo(){ if(historyIndex<history.length-1){ historyindex++;="" data="JSON.parse(history[historyIndex]);" savedata(false);="" applydata();="" renderproducts();="" showtoast('إعادة');="" }="" function="" initevents(){="" $('#owner-login-link').onclick="()" ==""> showLogin(true);
+    $('#login-btn').onclick = handleLogin;
+    $('#login-cancel').onclick = () =&gt; showLogin(false);
+    $('#password-input').addEventListener('keydown', e=&gt;{ if(e.key==='Enter') handleLogin(); });
+
+    $('#edit-toggle').onchange = e =&gt; toggleEditMode(e.target.checked);
+    $('#btn-preview').onclick = togglePreview;
+    $('#btn-save-copy').onclick = saveCopy;
+    $('#btn-panel').onclick = ()=&gt;{ $('#admin-panel').classList.remove('hidden'); switchTab('products'); };
+    $('#panel-close').onclick = ()=&gt; $('#admin-panel').classList.add('hidden');
+    $('#btn-logout').onclick = logout;
+    $('#btn-undo').onclick = undo;
+    $('#btn-redo').onclick = redo;
+
+    document.addEventListener('blur', handleEditableBlur, true);
+
+    $('#product-form').onsubmit = (e)=&gt;{
+      e.preventDefault();
+      const obj = {
+        name: $('#p-name').value.trim(),
+        price: Number($('#p-price').value),
+        image: $('#p-image').value.trim(),
+        description: $('#p-desc').value.trim()
+      };
+      const editing = $('#product-form').dataset.editing;
+      if(editing){
+        const p = data.products.find(x=&gt;x.id==editing);
+        Object.assign(p, obj);
+        delete $('#product-form').dataset.editing;
+      }else{
+        obj.id = Date.now();
+        data.products.unshift(obj);
+      }
+      saveData(); renderProducts(); e.target.reset(); showToast('تم حفظ المنتج');
+    };
+    $('#p-clear').onclick = ()=&gt;{ $('#product-form').reset(); delete $('#product-form').dataset.editing; };
+
+    $('#save-content').onclick = ()=&gt;{
+      data.hero.title = $('#heroTitleInput').value.trim();
+      data.hero.subtitle = $('#heroSubtitleInput').value.trim();
+      data.about = $('#aboutInput').value.trim();
+      data.whatsapp = $('#whatsappInput').value.replace(/\D/g,'');
+      saveData(); applyData(); renderProducts(); showToast('تم حفظ المحتوى');
+    };
+    $('#save-design').onclick = ()=&gt;{
+      data.colors.primary = $('#color-primary').value;
+      data.colors.gold = $('#color-gold').value;
+      data.font = $('#font-select').value;
+      saveData(); applyData(); showToast('تم حفظ التصميم');
+    };
+    $('#change-pass-btn').onclick = ()=&gt;{
+      const old = $('#old-pass').value;
+      const nw = $('#new-pass').value;
+      if(old!==data.password) return showToast('الحالية غير صحيحة','err');
+      if(nw.length&lt;6) return showToast('كلمة مرور ضعيفة','err');
+      data.password = nw; saveData(); $('#old-pass').value=''; $('#new-pass').value=''; showToast('تم تغيير كلمة المرور');
+    };
+    $('#export-btn').onclick = ()=&gt;{
+      const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+      const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='makhawir-backup.json'; a.click(); URL.revokeObjectURL(a.href);
+    };
+    $('#import-input').onchange = (e)=&gt;{
+      const f = e.target.files[0]; if(!f) return;
+      const r = new FileReader();
+      r.onload = ()=&gt;{ try{ const obj = JSON.parse(r.result); data = {...DEFAULT_DATA, ...obj}; saveData(); applyData(); renderProducts(); showToast('تم الاستيراد'); }catch{ showToast('ملف غير صالح','err'); } };
+      r.readAsText(f);
+    };
+    $('#reset-btn').onclick = ()=&gt;{ if(confirm('متأكدة؟ سيتم حذف كل التعديلات')){ localStorage.removeItem('makhawir_data'); location.reload(); } };
+
+    $$('.tab-btn').forEach(b=&gt;b.onclick=()=&gt;switchTab(b.dataset.tab));
+  }
+
+  document.addEventListener('DOMContentLoaded', ()=&gt;{
+    loadData();
+    applyData();
+    renderProducts();
+    initEvents();
+    checkSession();
+  });
+})();
+
+
+</history.length-1){></div></body></html>
